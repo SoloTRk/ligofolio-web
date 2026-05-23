@@ -1,0 +1,158 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout
+  title="ligofolio — Emlakçılar için bağlantı ve eşleşme"
+  description="ligofolio; emlakçıların müşteri portföylerini yönettiği, mesleki bağlantılar kurduğu ve gayrimenkul taleplerini eşleştirdiği B2B mobil platformdur."
+>
+  <section class="hero">
+    <h1>ligofolio</h1>
+    <p class="tagline">
+      Emlakçılar için <strong>bağlantı</strong>, <strong>portföy paylaşımı</strong>
+      ve <strong>eşleşme</strong> platformu.
+    </p>
+    <p class="subtagline">
+      Müşteri yönetimi (CRM), gayrimenkul portföyü ve mesleki ağ — tek mobil uygulamada.
+    </p>
+
+    <div class="cta-row" aria-label="Mağaza linkleri">
+      <span class="cta-placeholder">App Store — yakında</span>
+      <span class="cta-placeholder">Google Play — yakında</span>
+    </div>
+  </section>
+
+  <section class="legal-cards">
+    <h2 class="section-title">Yasal Bilgiler</h2>
+    <div class="card-grid">
+      <a href="/privacy" class="card">
+        <h3>Gizlilik Politikası</h3>
+        <p>KVKK ve GDPR çerçevesinde kişisel veri işleme politikamız.</p>
+      </a>
+      <a href="/terms" class="card">
+        <h3>Kullanım Şartları</h3>
+        <p>ligofolio kullanım sözleşmesi — Türk hukuku, B2B platform standardı.</p>
+      </a>
+      <a href="/support" class="card">
+        <h3>Destek</h3>
+        <p>Soru, geri bildirim ve hesap işlemleri için iletişim kanallarımız.</p>
+      </a>
+    </div>
+  </section>
+
+  <section class="company-info">
+    <h2 class="section-title">Şirket</h2>
+    <table class="info-table">
+      <tbody>
+        <tr>
+          <th scope="row">Ünvan</th>
+          <td>AUTORIZEN IOT TEKNOLOJİLERİ VE MOBİLİTE HİZMETLERİ</td>
+        </tr>
+        <tr>
+          <th scope="row">Vergi Numarası</th>
+          <td>1031565901</td>
+        </tr>
+        <tr>
+          <th scope="row">MERSİS</th>
+          <td>0103156590100001</td>
+        </tr>
+        <tr>
+          <th scope="row">Adres</th>
+          <td>Samsun, Türkiye</td>
+        </tr>
+        <tr>
+          <th scope="row">İletişim</th>
+          <td><a href="mailto:info@ligofolio.com">info@ligofolio.com</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</Layout>
+
+<style>
+  .hero {
+    text-align: center;
+    padding: 3rem 0 2.5rem;
+  }
+  .hero h1 {
+    font-size: 3rem;
+    margin: 0 0 0.5rem;
+    letter-spacing: -0.02em;
+    color: #071a3d;
+  }
+  .tagline {
+    font-size: 1.25rem;
+    margin: 0.5rem 0;
+    color: #334155;
+  }
+  .subtagline {
+    color: #64748b;
+    margin: 0.5rem 0 2rem;
+  }
+  .cta-row {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 1.5rem;
+  }
+  .cta-placeholder {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    background: #f1f5f9;
+    color: #64748b;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    border: 1px dashed #cbd5e1;
+  }
+
+  .section-title {
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    font-size: 1.5rem;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 0.3rem;
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+  .card {
+    display: block;
+    padding: 1.25rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    text-decoration: none;
+    color: inherit;
+    background: #ffffff;
+    transition:
+      border-color 150ms ease,
+      transform 150ms ease;
+  }
+  .card:hover {
+    border-color: #071a3d;
+    transform: translateY(-2px);
+  }
+  .card h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1.1rem;
+    color: #071a3d;
+  }
+  .card p {
+    margin: 0;
+    color: #475569;
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+
+  .info-table {
+    margin-top: 1rem;
+  }
+  .info-table th {
+    width: 30%;
+    background: #f8fafc;
+  }
+</style>
