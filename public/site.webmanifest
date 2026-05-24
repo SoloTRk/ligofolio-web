@@ -1,0 +1,24 @@
+{
+  "name": "ligofolio",
+  "short_name": "ligofolio",
+  "description": "Emlakçılar için müşteri yönetimi, portföy paylaşımı ve akıllı eşleşme.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#071A3D",
+  "theme_color": "#071A3D",
+  "lang": "tr-TR",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

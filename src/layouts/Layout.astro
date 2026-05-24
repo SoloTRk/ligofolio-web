@@ -14,7 +14,30 @@ const title = frontmatter?.title ?? propTitle ?? 'ligofolio';
 const description =
   frontmatter?.description ??
   propDescription ??
-  'Emlakçılar için bağlantı, portföy paylaşımı ve eşleşme platformu.';
+  'Emlakçılar için müşteri yönetimi (CRM), portföy paylaşımı ve akıllı eşleşme — tek mobil uygulamada.';
+
+const SITE = (Astro.site ?? new URL('https://ligofolio.com')).toString().replace(/\/$/, '');
+const canonical = new URL(Astro.url.pathname, SITE).toString();
+const ogImage = new URL('/icon.png', SITE).toString();
+
+const websiteSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: 'ligofolio',
+  url: SITE,
+  inLanguage: 'tr-TR',
+  publisher: {
+    '@type': 'Organization',
+    name: 'AUTORIZEN IOT TEKNOLOJİLERİ VE MOBİLİTE HİZMETLERİ',
+    url: SITE,
+    logo: ogImage,
+    address: {
+      '@type': 'PostalAddress',
+      addressLocality: 'Samsun',
+      addressCountry: 'TR',
+    },
+  },
+};
 ---
 
 <!doctype html>
@@ -22,10 +45,37 @@ const description =
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#071A3D" />
+    <meta name="color-scheme" content="light" />
     <meta name="description" content={description} />
     <meta name="generator" content={Astro.generator} />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="format-detection" content="telephone=no" />
+    <link rel="canonical" href={canonical} />
+
+    <link rel="icon" type="image/png" sizes="any" href="/icon.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ligofolio" />
+    <meta property="og:locale" content="tr_TR" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:alt" content="ligofolio — emlakçılar için CRM, portföy ve eşleşme" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
     <title>{title}</title>
+
+    <script type="application/ld+json" set:html={JSON.stringify(websiteSchema)} is:inline />
   </head>
   <body>
     <header class="site-header">

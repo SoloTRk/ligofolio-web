@@ -74,8 +74,8 @@ Cihaz GPS'iniz **toplanmaz**. Konum verileri yalnızca kullanıcının formda el
 
 ### 2.5 İçerik Verileri
 
-- **Bacak 1 — Kişisel CRM:** Cihaz rehberinizden seçerek içe aktardığınız kişiler (ad, soyad, telefon, e-posta, etiket), bu kişilere ilişkin notlar, sesli kayıtlar, eklediğiniz fotoğraflar, hatırlatıcılar, kategoriler. Bu veriler **size özeldir** ve diğer kullanıcılarla paylaşılmaz.
-- **Bacak 2 — Portföy ve Eşleşme:** Gayrimenkul ilanlarınızın açıklamaları, fotoğrafları, fiyat ve teknik özellikleri; aradığınız gayrimenkule ilişkin talep kriterleri.
+- **Kişisel Müşteri Yönetimi (CRM):** Cihaz rehberinizden seçerek içe aktardığınız kişiler (ad, soyad, telefon, e-posta, etiket), bu kişilere ilişkin notlar, sesli kayıtlar, eklediğiniz fotoğraflar, hatırlatıcılar, kategoriler. Bu veriler **size özeldir** ve diğer kullanıcılarla paylaşılmaz.
+- **Portföy ve Eşleşme:** Gayrimenkul ilanlarınızın açıklamaları, fotoğrafları, fiyat ve teknik özellikleri; aradığınız gayrimenkule ilişkin talep kriterleri.
 
 ### 2.6 Teknik Veriler
 
@@ -108,7 +108,7 @@ Mutating (yazma) işlemlerin sistem tarafından otomatik tutulan kaydı (kim, ne
 | Veri Kategorisi | İşleme Amacı |
 |---|---|
 | Kimlik + iletişim | Uygulamanın temel işlevi: emlakçılar arası mesleki bağlantı, ilan/talep paylaşımı |
-| Rehber (Bacak 1 CRM) | Yalnız kullanıcının kendi müşteri yönetimi — diğer kullanıcılarla paylaşılmaz |
+| Rehber (kişisel müşteri yönetimi) | Yalnız kullanıcının kendi müşteri yönetimi — diğer kullanıcılarla paylaşılmaz |
 | Konum (ilan/talep) | İlan-talep eşleşme algoritmasının çalıştırılması |
 | Görsel veriler | İlan ve profilin görsel sunumu |
 | Push token | Uygulama bildirimlerinin teslimi |
@@ -130,7 +130,7 @@ Kişisel verilerinizi yalnızca KVKK m.5/6 ve GDPR Art. 6'da öngörülen hukuki
 | Telefon, iletişim e-postası, şirket bilgisi | m.5/1 | Art. 6(1)(a) | Açık rıza (görünürlük toggle'ları üzerinden) |
 | Konum (ilan/talep) | m.5/2-c | Art. 6(1)(b) | Sözleşmenin ifası — eşleşme algoritması için zorunlu |
 | Push token, cihaz teknik bilgileri | m.5/2-c | Art. 6(1)(b) | Sözleşmenin ifası — bildirim teslimi |
-| Cihaz rehberi içe aktarımı (Bacak 1) | m.5/1 | Art. 6(1)(a) | Açık rıza (OS izni + uygulama içi onay) |
+| Cihaz rehberi içe aktarımı | m.5/1 | Art. 6(1)(a) | Açık rıza (OS izni + uygulama içi onay) |
 | Hata izleme | m.5/2-f | Art. 6(1)(f) | Meşru menfaat (uygulama kararlılığı) |
 | Audit log | m.5/2-ç | Art. 6(1)(c) | Hukuki yükümlülük (KVKK m.12) |
 | Pazarlama bildirimi (ileride) | m.5/1 | Art. 6(1)(a) | Açık rıza (bildirim tercihleri toggle) |

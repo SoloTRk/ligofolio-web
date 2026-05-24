@@ -37,8 +37,8 @@ Uygulamayı indirerek, kaydolarak veya kullanarak işbu Sözleşme'yi okuduğunu
 
 Ligofolio, **gayrimenkul sektöründe çalışan emlakçılar arasında**:
 
-- Kişisel müşteri yönetimi (CRM — Bacak 1)
-- Gayrimenkul portföy paylaşımı ve eşleştirme (Bacak 2)
+- Kişisel müşteri yönetimi (CRM)
+- Gayrimenkul portföy paylaşımı ve eşleştirme
 - Mesleki bağlantı kurma
 
 amaçlarıyla bir yazılım hizmeti sunan **B2B (işletmeler arası) bir platformdur**. Ligofolio:

@@ -1,5 +1,16 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
+import sitemap from '@astrojs/sitemap';
 
 // https://astro.build/config
-export default defineConfig({});
+export default defineConfig({
+  site: 'https://ligofolio.com',
+  integrations: [
+    sitemap({
+      i18n: {
+        defaultLocale: 'tr',
+        locales: { tr: 'tr-TR' },
+      },
+    }),
+  ],
+});
