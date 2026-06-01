@@ -2,7 +2,7 @@
   "applinks": {
     "details": [
       {
-        "appIDs": ["__APPLE_TEAM_ID__.com.ligofolio.crm"],
+        "appIDs": ["8QC85UW3N8.com.ligofolio.crm"],
         "components": [
           { "/": "/user/*", "comment": "Kullanici profili paylasimi" },
           { "/": "/listing/*", "comment": "Ilan paylasimi" },
