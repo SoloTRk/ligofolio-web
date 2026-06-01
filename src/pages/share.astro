@@ -1,0 +1,282 @@
+---
+// Universal Link / App Link fallback sayfası (BACKLOG §13.1, ADR-0040).
+//
+// Vercel rewrites bu sayfayı şu URL kalıpları için servis eder (URL barı
+// `/user/<id>` olarak görünür, sayfa içeriği `/share`):
+//   /user/:id      → kullanıcı profili paylaşımı
+//   /listing/:id   → ilan paylaşımı
+//   /wall/:id      → talep paylaşımı
+//   /join/:code    → organizasyon davet kodu
+//
+// Akış (kullanıcı app yüklüyse Universal Link buraya HİÇ gelmez — iOS/Android
+// linki yakalar, app'i açar; bu sayfa SADECE app olmayanlar için):
+//   1. Sayfa yüklenir → ne tür içerik olduğunu ve ID'yi pathname'den çıkarır
+//   2. Markaya uygun "tanıtım kartı" + "Uygulamada Aç" CTA + Store butonları
+//   3. "Uygulamada Aç" custom scheme'i (ligofolio://) dener — app yüklüyse
+//      açılır; değilse sessiz fail, kullanıcı Store CTA'ya geçer
+//
+// Astro static mode'da çalışır — JS pathname okur, içeriği client-side render.
+//
+// NOT (ADR-0040): MVP'de saf-statik. Profil/ilan/talep ham verisini SSR ile
+// gösterme (gerçek avatar/ad/fiyat) ileride; şimdilik jenerik tanıtım kartı +
+// app'e yönlendirme yeterli (BACKLOG §13.1 kabul kriteri: "web sayfasında
+// profili gösterir + uygulamayı indirme yönlendirmesi yapar" — jenerik gösterim
+// bu kriteri karşılar; zengin önizleme P2 follow-up).
+
+import Layout from '../layouts/Layout.astro';
+
+const TITLE = 'ligofolio — Uygulamada Aç';
+const DESCRIPTION =
+  'Bu içerik ligofolio uygulamasında açılacak. Uygulama yüklü değilse App Store veya Google Play\'den indirebilirsin.';
+---
+
+<Layout title={TITLE} description={DESCRIPTION}>
+  <section class="share-card">
+    <div class="brand-bubble" aria-hidden="true">
+      <span>L</span>
+    </div>
+
+    <h1 id="share-title">ligofolio'da bir içerik paylaşıldı</h1>
+    <p id="share-subtitle" class="lede">
+      İçeriği görmek için ligofolio uygulamasını aç.
+    </p>
+
+    <div class="cta-stack">
+      <button id="open-app" type="button" class="cta-primary">
+        Uygulamada Aç
+      </button>
+
+      <span class="cta-divider">veya indir</span>
+
+      <div class="store-row">
+        <a
+          id="store-ios"
+          href="https://apps.apple.com/app/id__APP_STORE_ID__"
+          class="store-cta"
+          target="_blank"
+          rel="noopener"
+        >
+          <strong>App Store</strong>
+          <small>iPhone &amp; iPad</small>
+        </a>
+        <a
+          id="store-android"
+          href="https://play.google.com/store/apps/details?id=com.ligofolio.crm"
+          class="store-cta"
+          target="_blank"
+          rel="noopener"
+        >
+          <strong>Google Play</strong>
+          <small>Android</small>
+        </a>
+      </div>
+    </div>
+
+    <p class="footnote">
+      Bu link bir <strong id="share-kind-label">ligofolio</strong> içeriği için
+      oluşturuldu.<br />
+      <code id="share-debug" class="muted"></code>
+    </p>
+  </section>
+</Layout>
+
+<script is:inline>
+  // ─── Pathname'den içerik tipini ve ID'yi çıkar ──────────────────────
+  // URL şeması: /user/<id> · /listing/<id> · /wall/<id> · /join/<code>
+  // Vercel rewrite URL barını /user/<id> olarak korur; pathname ondan okunur.
+
+  (function () {
+    var path = window.location.pathname || '';
+    var parts = path.split('/').filter(Boolean);
+    var kind = parts[0] || ''; // "user" | "listing" | "wall" | "join"
+    var id = parts[1] || '';
+
+    // İçerik tipine göre CTA + başlık + scheme
+    var KIND_CONFIG = {
+      user: {
+        title: 'Profil paylaşıldı',
+        subtitle: 'Bu emlakçı profilini ligofolio uygulamasında aç.',
+        label: 'profil',
+        scheme: 'ligofolio://user/',
+      },
+      listing: {
+        title: 'İlan paylaşıldı',
+        subtitle: 'Bu gayrimenkul ilanını ligofolio uygulamasında aç.',
+        label: 'ilan',
+        scheme: 'ligofolio://listing/',
+      },
+      wall: {
+        title: 'Talep paylaşıldı',
+        subtitle: 'Bu portföy talebini ligofolio uygulamasında aç.',
+        label: 'talep',
+        scheme: 'ligofolio://wall/',
+      },
+      join: {
+        title: 'Organizasyon davetiyesi',
+        subtitle: 'Bu davet kodunu ligofolio uygulamasında kullan.',
+        label: 'davet kodu',
+        scheme: 'ligofolio://join/',
+      },
+    };
+
+    var cfg = KIND_CONFIG[kind] || {
+      title: 'ligofolio bağlantısı',
+      subtitle: 'Bu içeriği ligofolio uygulamasında aç.',
+      label: 'içerik',
+      scheme: 'ligofolio://',
+    };
+
+    var titleEl = document.getElementById('share-title');
+    var subEl = document.getElementById('share-subtitle');
+    var labelEl = document.getElementById('share-kind-label');
+    var debugEl = document.getElementById('share-debug');
+
+    if (titleEl) titleEl.textContent = cfg.title;
+    if (subEl) subEl.textContent = cfg.subtitle;
+    if (labelEl) labelEl.textContent = cfg.label;
+    if (debugEl && id) debugEl.textContent = '#' + id.slice(0, 8);
+
+    // ─── App store yönlendirmesi cihaza göre ─────────────────────────
+    var ua = navigator.userAgent || '';
+    var isAndroid = /Android/i.test(ua);
+    var isIOS = /iPhone|iPad|iPod/i.test(ua);
+
+    var iosBtn = document.getElementById('store-ios');
+    var androidBtn = document.getElementById('store-android');
+    if (isAndroid && iosBtn) iosBtn.style.display = 'none';
+    if (isIOS && androidBtn) androidBtn.style.display = 'none';
+
+    // ─── "Uygulamada Aç" — custom scheme dene ────────────────────────
+    var openBtn = document.getElementById('open-app');
+    if (openBtn) {
+      openBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        if (!id) return;
+        // Sessiz: app yoksa scheme açılmaz (browser hata vermez), kullanıcı
+        // sayfada kalır → Store CTA'sına geçer.
+        window.location.href = cfg.scheme + id;
+      });
+    }
+  })();
+</script>
+
+<style>
+  .share-card {
+    max-width: 480px;
+    margin: 3rem auto;
+    text-align: center;
+    padding: 0 1.25rem;
+  }
+  .brand-bubble {
+    width: 88px;
+    height: 88px;
+    border-radius: 50%;
+    background: #071a3d;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 1.5rem;
+    font-weight: 800;
+    font-size: 2.5rem;
+    line-height: 1;
+    letter-spacing: -0.04em;
+  }
+  .share-card h1 {
+    font-size: 1.6rem;
+    color: #071a3d;
+    margin: 0 0 0.5rem;
+    border: none;
+    padding: 0;
+    line-height: 1.25;
+  }
+  .lede {
+    color: #475569;
+    font-size: 1rem;
+    line-height: 1.5;
+    margin: 0 0 2rem;
+  }
+  .cta-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: stretch;
+  }
+  .cta-primary {
+    background: #071a3d;
+    color: #ffffff;
+    border: none;
+    border-radius: 12px;
+    padding: 1rem 1.5rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: -0.01em;
+    transition:
+      transform 120ms ease,
+      background 120ms ease;
+  }
+  .cta-primary:hover {
+    background: #0a2454;
+  }
+  .cta-primary:active {
+    transform: scale(0.985);
+  }
+  .cta-divider {
+    color: #94a3b8;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin: 0.25rem 0;
+  }
+  .store-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+  .store-cta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 0.75rem 1rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #1f2937;
+    text-decoration: none;
+    line-height: 1.2;
+    transition: border-color 120ms ease;
+  }
+  .store-cta:hover {
+    border-color: #071a3d;
+  }
+  .store-cta strong {
+    font-size: 0.95rem;
+    color: #0f172a;
+  }
+  .store-cta small {
+    font-size: 0.78rem;
+    color: #64748b;
+    margin-top: 2px;
+  }
+  .footnote {
+    margin-top: 2rem;
+    font-size: 0.85rem;
+    color: #94a3b8;
+    line-height: 1.5;
+  }
+  .footnote strong {
+    color: #475569;
+  }
+  .muted {
+    color: #cbd5e1;
+    background: transparent;
+    padding: 0;
+    font-size: 0.78rem;
+  }
+  @media (max-width: 480px) {
+    .store-row {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

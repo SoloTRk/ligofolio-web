@@ -1,0 +1,15 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["__APPLE_TEAM_ID__.com.ligofolio.crm"],
+        "components": [
+          { "/": "/user/*", "comment": "Kullanici profili paylasimi" },
+          { "/": "/listing/*", "comment": "Ilan paylasimi" },
+          { "/": "/wall/*", "comment": "Talep paylasimi" },
+          { "/": "/join/*", "comment": "Organizasyon davet kodu" }
+        ]
+      }
+    ]
+  }
+}
