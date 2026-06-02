@@ -1,0 +1,452 @@
+---
+// Premium Aktivasyonu — Apple Hide-My-Email fallback (ADR-0041 §2 Yol C).
+//
+// 2 adımlı akış:
+//   Adım 1: Kullanıcı satın alma email'ini gir → request-premium-otp Edge
+//           Function çağırılır → o e-postaya 6-haneli OTP yollanır
+//   Adım 2: Kullanıcı OTP'yi gir → claim_pending_premium_with_otp RPC →
+//           grant kullanıcıya bağlanır → premium aktif
+//
+// Auth gate: session yoksa /login?next=/premium-activate'a redirect.
+//
+// Hata kodları (Edge Function'dan):
+//   no_pending_grant       — anchor bu email için grant vermedi mi sorgu
+//   otp_already_pending    — 10dk içinde aktif challenge var
+//   email_send_failed      — Brevo hatası
+// Hata kodları (RPC'den):
+//   otp_invalid_or_expired — challenge yok
+//   otp_locked             — 3 yanlış deneme
+//   otp_mismatch           — yanlış OTP (+ attempts_left)
+//   grant_not_found_or_consumed — pending grant kalmadı
+
+import Layout from '../layouts/Layout.astro';
+
+const PAGE_TITLE = 'Premium Aktivasyonu — Ligofolio';
+const PAGE_DESCRIPTION =
+  'Apple Hide-My-Email kullanan kullanıcılar için premium üyeliğin uygulamaya bağlanması.';
+---
+
+<Layout title={PAGE_TITLE} description={PAGE_DESCRIPTION}>
+  <main class="activate">
+    <div class="card">
+      <h1>Premium Aktivasyonu</h1>
+      <p class="subtitle">
+        Anchor/bayinden satın alma yaparken kullandığın e-posta adresini
+        doğrulayalım — premium üyeliğin bu cihaza bağlanacak.
+      </p>
+
+      <!-- ─── Adım 1: Email gir ─── -->
+      <div id="step-1" class="step">
+        <form id="email-form" class="form">
+          <label for="email">Satın alma e-postan</label>
+          <input
+            id="email"
+            type="email"
+            name="email"
+            required
+            autocomplete="email"
+            inputmode="email"
+            placeholder="ornek@adres.com"
+          />
+          <p class="hint">
+            Anchor/bayinin senin için kayıt ettiği e-posta adresi. Bu sayfadaki
+            "giriş" e-postandan farklı olabilir.
+          </p>
+
+          <button type="submit" class="btn primary" id="email-submit">
+            Doğrulama kodu yolla
+          </button>
+
+          <div id="email-error" class="form-error" role="alert" hidden></div>
+        </form>
+      </div>
+
+      <!-- ─── Adım 2: OTP gir ─── -->
+      <div id="step-2" class="step" hidden>
+        <p class="otp-info">
+          <strong id="otp-email-display"></strong> adresine 6-haneli kod
+          gönderdik. Mail kutunu kontrol et + spam'a düştüyse oradan al.
+        </p>
+
+        <form id="otp-form" class="form">
+          <label for="otp">6-haneli kod</label>
+          <input
+            id="otp"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]{6}"
+            maxlength="6"
+            required
+            autocomplete="one-time-code"
+            class="otp-input"
+            placeholder="000000"
+          />
+
+          <button type="submit" class="btn primary" id="otp-submit">
+            Aktive Et
+          </button>
+
+          <div id="otp-error" class="form-error" role="alert" hidden></div>
+        </form>
+
+        <button type="button" class="btn link" id="back-to-email">
+          ← E-posta adresini değiştir
+        </button>
+      </div>
+
+      <!-- ─── Başarı ekranı ─── -->
+      <div id="success" class="step success" hidden>
+        <div class="success-icon">✓</div>
+        <h2>Aktivasyon başarılı!</h2>
+        <p>
+          Premium üyeliğin bu cihaza bağlandı. Uygulamayı aç — premium
+          özelliklerini hemen kullanabilirsin.
+        </p>
+        <a href="https://ligofolio.com" class="btn primary" id="open-app">
+          Uygulamayı Aç
+        </a>
+        <p class="hint" style="margin-top: 16px;">
+          Uygulama açılmıyorsa cihazına Ligofolio kurulu olduğundan emin ol.
+        </p>
+      </div>
+    </div>
+  </main>
+
+  <script
+    define:vars={{
+      supabaseUrl: import.meta.env.PUBLIC_SUPABASE_URL,
+      supabaseAnonKey: import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+    }}
+  >
+    import('https://esm.sh/@supabase/supabase-js@2').then(({ createClient }) => {
+      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+        },
+      });
+
+      const step1 = document.getElementById('step-1');
+      const step2 = document.getElementById('step-2');
+      const successDiv = document.getElementById('success');
+      const emailForm = document.getElementById('email-form');
+      const otpForm = document.getElementById('otp-form');
+      const emailSubmit = document.getElementById('email-submit');
+      const otpSubmit = document.getElementById('otp-submit');
+      const emailError = document.getElementById('email-error');
+      const otpError = document.getElementById('otp-error');
+      const backBtn = document.getElementById('back-to-email');
+      const otpEmailDisplay = document.getElementById('otp-email-display');
+      const otpInput = document.getElementById('otp');
+
+      let currentEmail = '';
+      let sessionToken = '';
+
+      function showStep(step) {
+        step1.hidden = step !== 1;
+        step2.hidden = step !== 2;
+        successDiv.hidden = step !== 3;
+      }
+
+      function showError(box, msg) {
+        box.textContent = msg;
+        box.hidden = false;
+      }
+
+      function clearError(box) {
+        box.hidden = true;
+        box.textContent = '';
+      }
+
+      // Auth gate
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (!session?.access_token) {
+          location.href = '/login?next=' + encodeURIComponent('/premium-activate');
+          return;
+        }
+        sessionToken = session.access_token;
+      });
+
+      // Adım 1: Email submit → request-premium-otp Edge Function
+      emailForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        clearError(emailError);
+        emailSubmit.disabled = true;
+        emailSubmit.textContent = 'Gönderiliyor...';
+
+        const formData = new FormData(emailForm);
+        currentEmail = String(formData.get('email') ?? '')
+          .trim()
+          .toLowerCase();
+
+        try {
+          const response = await fetch(
+            supabaseUrl + '/functions/v1/request-premium-otp',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + sessionToken,
+                apikey: supabaseAnonKey,
+              },
+              body: JSON.stringify({ email: currentEmail }),
+            }
+          );
+
+          const data = await response.json();
+
+          emailSubmit.disabled = false;
+          emailSubmit.textContent = 'Doğrulama kodu yolla';
+
+          if (!data.ok) {
+            if (data.code === 'no_pending_grant') {
+              showError(
+                emailError,
+                'Bu e-posta için bekleyen premium üyelik bulunamadı. Anchor/bayinin sana ilettiği e-posta ile aynı olduğundan emin ol.'
+              );
+            } else if (data.code === 'otp_already_pending') {
+              showError(
+                emailError,
+                '10 dakika içinde bu e-posta için zaten kod yollandı. Mail kutunu kontrol et veya 10 dakika bekle.'
+              );
+            } else if (data.code === 'email_send_failed') {
+              showError(
+                emailError,
+                'Mail gönderim hatası. Birkaç dakika sonra tekrar dene.'
+              );
+            } else if (data.code === 'auth_required') {
+              location.href = '/login?next=' + encodeURIComponent('/premium-activate');
+            } else {
+              showError(emailError, 'Hata: ' + (data.code ?? 'bilinmeyen'));
+            }
+            return;
+          }
+
+          // Başarılı → adım 2'ye geç
+          otpEmailDisplay.textContent = currentEmail;
+          showStep(2);
+          setTimeout(() => otpInput.focus(), 100);
+        } catch (err) {
+          emailSubmit.disabled = false;
+          emailSubmit.textContent = 'Doğrulama kodu yolla';
+          showError(emailError, 'Ağ hatası — tekrar dene.');
+        }
+      });
+
+      // Adım 2: OTP submit → claim_pending_premium_with_otp RPC
+      otpForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        clearError(otpError);
+        otpSubmit.disabled = true;
+        otpSubmit.textContent = 'Doğrulanıyor...';
+
+        const formData = new FormData(otpForm);
+        const otp = String(formData.get('otp') ?? '').trim();
+
+        try {
+          const { data, error } = await supabase.rpc(
+            'claim_pending_premium_with_otp',
+            { p_email: currentEmail, p_otp: otp }
+          );
+
+          otpSubmit.disabled = false;
+          otpSubmit.textContent = 'Aktive Et';
+
+          if (error) {
+            showError(otpError, 'Hata: ' + error.message);
+            return;
+          }
+
+          // claim_pending_premium_with_otp jsonb döner (AP-0025 fix)
+          if (!data?.ok) {
+            const code = data?.code;
+            if (code === 'otp_mismatch') {
+              const left = data.attempts_left ?? 0;
+              showError(
+                otpError,
+                left > 0
+                  ? 'Yanlış kod. ' + left + ' deneme hakkın kaldı.'
+                  : 'Yanlış kod. Yeni kod talep et.'
+              );
+            } else if (code === 'otp_locked') {
+              showError(
+                otpError,
+                'Çok fazla yanlış deneme. Yeni kod talep et.'
+              );
+            } else if (code === 'otp_invalid_or_expired') {
+              showError(
+                otpError,
+                'Kodun süresi doldu (10dk). Yeniden kod talep et.'
+              );
+            } else if (code === 'grant_not_found_or_consumed') {
+              showError(
+                otpError,
+                'Bu e-posta için bekleyen üyelik kalmadı.'
+              );
+            } else {
+              showError(otpError, 'Hata: ' + (code ?? 'bilinmeyen'));
+            }
+            return;
+          }
+
+          // Başarı!
+          showStep(3);
+        } catch (err) {
+          otpSubmit.disabled = false;
+          otpSubmit.textContent = 'Aktive Et';
+          showError(otpError, 'Ağ hatası — tekrar dene.');
+        }
+      });
+
+      // "E-posta değiştir" → adım 1'e geri
+      backBtn.addEventListener('click', () => {
+        clearError(otpError);
+        otpInput.value = '';
+        showStep(1);
+      });
+
+      // OTP input: sadece rakam + tek seferde 6 rakam (paste destek)
+      otpInput.addEventListener('input', (e) => {
+        const cleaned = e.target.value.replace(/\D/g, '').slice(0, 6);
+        e.target.value = cleaned;
+      });
+    });
+  </script>
+</Layout>
+
+<style>
+  .activate {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: #f5f5f7;
+  }
+  .card {
+    width: 100%;
+    max-width: 480px;
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 40px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  }
+  h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0 0 8px;
+    color: #0a0a0a;
+  }
+  h2 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 16px 0 8px;
+    color: #15803d;
+  }
+  .subtitle {
+    font-size: 15px;
+    color: #666;
+    margin: 0 0 24px;
+    line-height: 1.5;
+  }
+  .otp-info {
+    font-size: 14px;
+    color: #444;
+    margin: 0 0 24px;
+    line-height: 1.5;
+    background: #f0f4ff;
+    padding: 12px 16px;
+    border-radius: 8px;
+  }
+  .form {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #444;
+    margin-top: 12px;
+  }
+  input {
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 15px;
+    background: #fff;
+  }
+  input:focus {
+    outline: 2px solid #1a73e8;
+    outline-offset: 0;
+    border-color: transparent;
+  }
+  .otp-input {
+    font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+    font-size: 24px;
+    letter-spacing: 12px;
+    text-align: center;
+    padding: 12px;
+  }
+  .hint {
+    font-size: 12px;
+    color: #999;
+    margin: 4px 0 0;
+    line-height: 1.4;
+  }
+  .btn {
+    border: none;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    margin-top: 16px;
+    transition: opacity 0.15s;
+    display: inline-block;
+    text-align: center;
+    text-decoration: none;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .primary {
+    background: #071a3d;
+    color: #fff;
+  }
+  .primary:hover:not(:disabled) {
+    background: #0a2455;
+  }
+  .link {
+    background: transparent;
+    color: #1a73e8;
+    margin-top: 8px;
+    font-size: 14px;
+  }
+  .form-error {
+    background: #fef2f2;
+    color: #b91c1c;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  .success {
+    text-align: center;
+  }
+  .success-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: #22c55e;
+    color: #fff;
+    font-size: 36px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 8px;
+  }
+</style>

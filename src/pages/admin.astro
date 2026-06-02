@@ -1,0 +1,500 @@
+---
+// Admin panel — Premium grant ver + anchor yönetimi + pending grants listesi.
+// ADR-0041 §5 — yalnız `profiles.is_admin = true` kullanıcılara açık.
+//
+// Auth + admin gate: client-side check (session yok → /login; is_admin false
+// → /premium-activate). SSR auth-cookie parsing pratik değil (Supabase cookie
+// format Astro context'inde extra setup), tarayıcı tarafı yeterli.
+//
+// 3 bölüm:
+//   1. Grant ver formu — admin_grant_premium RPC
+//   2. Anchor listesi — granted/used quota, son satışlar
+//   3. Pending grants — redeem edilmemiş, expires_at yakın olanlar
+
+import Layout from '../layouts/Layout.astro';
+
+const PAGE_TITLE = 'Admin — Ligofolio';
+const PAGE_DESCRIPTION = 'Premium grant + anchor yönetimi (admin only)';
+---
+
+<Layout title={PAGE_TITLE} description={PAGE_DESCRIPTION}>
+  <main class="admin">
+    <div id="loading" class="loading">Yükleniyor...</div>
+
+    <div id="content" hidden>
+      <header class="header">
+        <h1>Admin Panel</h1>
+        <div class="header-actions">
+          <span id="admin-email" class="admin-email"></span>
+          <button type="button" class="btn link" id="signout-btn">Çıkış</button>
+        </div>
+      </header>
+
+      <!-- ─── Bölüm 1: Grant ver ─── -->
+      <section class="section">
+        <h2>Premium Grant Ver</h2>
+        <p class="section-desc">
+          Email, gün sayısı, opsiyonel anchor ve havale referansı. Kullanıcı
+          kayıtlıysa anlık apply; değilse 90 gün boyunca pending.
+        </p>
+
+        <form id="grant-form" class="form-grid">
+          <div class="field">
+            <label for="grant-email">E-posta</label>
+            <input
+              id="grant-email"
+              type="email"
+              name="email"
+              required
+              autocomplete="off"
+            />
+          </div>
+
+          <div class="field">
+            <label for="grant-days">Süre</label>
+            <select id="grant-days" name="days" required>
+              <option value="365" selected>365 gün (1 yıl)</option>
+              <option value="180">180 gün (6 ay)</option>
+              <option value="90">90 gün (3 ay)</option>
+              <option value="30">30 gün (1 ay)</option>
+              <option value="7">7 gün (test)</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="grant-anchor">Anchor</label>
+            <select id="grant-anchor" name="anchor_id">
+              <option value="">Direkt satış (anchor yok)</option>
+            </select>
+          </div>
+
+          <div class="field full">
+            <label for="grant-ref">Ödeme Referansı</label>
+            <input
+              id="grant-ref"
+              type="text"
+              name="payment_reference"
+              placeholder="Banka havalesi açıklaması, WP tarihi vb."
+              autocomplete="off"
+            />
+          </div>
+
+          <div class="field full">
+            <button type="submit" class="btn primary" id="grant-submit">
+              Grant Ver
+            </button>
+            <div id="grant-result" class="form-result" role="status" hidden></div>
+          </div>
+        </form>
+      </section>
+
+      <!-- ─── Bölüm 2: Anchor listesi ─── -->
+      <section class="section">
+        <h2>Anchor'lar</h2>
+        <div id="anchors-list" class="table-wrap">
+          <p class="empty">Yükleniyor...</p>
+        </div>
+      </section>
+
+      <!-- ─── Bölüm 3: Pending grants ─── -->
+      <section class="section">
+        <h2>Bekleyen Grant'lar (Henüz Redeem Edilmemiş)</h2>
+        <div id="pending-list" class="table-wrap">
+          <p class="empty">Yükleniyor...</p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script
+    define:vars={{
+      supabaseUrl: import.meta.env.PUBLIC_SUPABASE_URL,
+      supabaseAnonKey: import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+    }}
+  >
+    import('https://esm.sh/@supabase/supabase-js@2').then(({ createClient }) => {
+      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+        },
+      });
+
+      const loadingEl = document.getElementById('loading');
+      const contentEl = document.getElementById('content');
+      const adminEmail = document.getElementById('admin-email');
+      const grantForm = document.getElementById('grant-form');
+      const grantSubmit = document.getElementById('grant-submit');
+      const grantResult = document.getElementById('grant-result');
+      const grantAnchorSelect = document.getElementById('grant-anchor');
+      const anchorsList = document.getElementById('anchors-list');
+      const pendingList = document.getElementById('pending-list');
+      const signoutBtn = document.getElementById('signout-btn');
+
+      function escapeHtml(str) {
+        return String(str).replace(/[&<>"']/g, (c) => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        })[c]);
+      }
+
+      async function init() {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) {
+          location.href = '/login?next=' + encodeURIComponent('/admin');
+          return;
+        }
+
+        // is_admin check
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('is_admin, display_name')
+          .eq('user_id', session.user.id)
+          .maybeSingle();
+
+        if (error || !profile?.is_admin) {
+          location.href = '/premium-activate';
+          return;
+        }
+
+        adminEmail.textContent =
+          session.user.email + ' · admin (' + profile.display_name + ')';
+
+        loadingEl.hidden = true;
+        contentEl.hidden = false;
+
+        // Verileri yükle
+        await Promise.all([
+          loadAnchors(),
+          loadPendingGrants(),
+        ]);
+      }
+
+      async function loadAnchors() {
+        const { data, error } = await supabase
+          .from('anchors')
+          .select('id, user_id, granted_quota, used_quota, status, wholesale_price_try, created_at')
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (error) {
+          anchorsList.innerHTML = '<p class="empty">Hata: ' + escapeHtml(error.message) + '</p>';
+          return;
+        }
+
+        if (!data?.length) {
+          anchorsList.innerHTML = '<p class="empty">Henüz anchor yok.</p>';
+          grantAnchorSelect.innerHTML = '<option value="">Direkt satış (anchor yok)</option>';
+          return;
+        }
+
+        // Anchor select'i doldur (sadece active anchors)
+        const activeAnchors = data.filter((a) => a.status === 'active');
+        grantAnchorSelect.innerHTML =
+          '<option value="">Direkt satış (anchor yok)</option>' +
+          activeAnchors.map((a) => {
+            const balance = a.granted_quota - a.used_quota;
+            return (
+              '<option value="' + a.id + '">' +
+              escapeHtml(a.user_id.slice(0, 8)) +
+              ' · ' + balance + '/' + a.granted_quota + ' quota' +
+              '</option>'
+            );
+          }).join('');
+
+        // Liste tablosu
+        anchorsList.innerHTML =
+          '<table class="table"><thead><tr>' +
+          '<th>Anchor (user_id)</th>' +
+          '<th>Quota</th>' +
+          '<th>Toptan ₺</th>' +
+          '<th>Durum</th>' +
+          '<th>Oluşturuldu</th>' +
+          '</tr></thead><tbody>' +
+          data.map((a) => {
+            const balance = a.granted_quota - a.used_quota;
+            const statusClass = a.status === 'active' ? 'status-active' :
+                                a.status === 'suspended' ? 'status-warn' : 'status-danger';
+            return (
+              '<tr>' +
+              '<td><code>' + escapeHtml(a.user_id.slice(0, 8)) + '...</code></td>' +
+              '<td>' + balance + '/' + a.granted_quota + '</td>' +
+              '<td>' + a.wholesale_price_try.toLocaleString('tr-TR') + ' ₺</td>' +
+              '<td><span class="status ' + statusClass + '">' + a.status + '</span></td>' +
+              '<td>' + new Date(a.created_at).toLocaleDateString('tr-TR') + '</td>' +
+              '</tr>'
+            );
+          }).join('') +
+          '</tbody></table>';
+      }
+
+      async function loadPendingGrants() {
+        const { data, error } = await supabase
+          .from('premium_grants')
+          .select('id, email, granted_days, plan_label, anchor_id, payment_reference, created_at, expires_at')
+          .is('redeemed_at', null)
+          .is('void_at', null)
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (error) {
+          pendingList.innerHTML = '<p class="empty">Hata: ' + escapeHtml(error.message) + '</p>';
+          return;
+        }
+
+        if (!data?.length) {
+          pendingList.innerHTML = '<p class="empty">Bekleyen grant yok.</p>';
+          return;
+        }
+
+        pendingList.innerHTML =
+          '<table class="table"><thead><tr>' +
+          '<th>E-posta</th>' +
+          '<th>Süre</th>' +
+          '<th>Plan</th>' +
+          '<th>Ref</th>' +
+          '<th>Oluşturuldu</th>' +
+          '<th>Expire</th>' +
+          '</tr></thead><tbody>' +
+          data.map((g) => (
+            '<tr>' +
+            '<td>' + escapeHtml(g.email) + '</td>' +
+            '<td>' + g.granted_days + 'g</td>' +
+            '<td>' + escapeHtml(g.plan_label ?? '-') + '</td>' +
+            '<td>' + escapeHtml(g.payment_reference ?? '-') + '</td>' +
+            '<td>' + new Date(g.created_at).toLocaleDateString('tr-TR') + '</td>' +
+            '<td>' + new Date(g.expires_at).toLocaleDateString('tr-TR') + '</td>' +
+            '</tr>'
+          )).join('') +
+          '</tbody></table>';
+      }
+
+      grantForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        grantResult.hidden = true;
+        grantSubmit.disabled = true;
+        grantSubmit.textContent = 'Kaydediliyor...';
+
+        const formData = new FormData(grantForm);
+        const email = String(formData.get('email')).trim().toLowerCase();
+        const days = parseInt(String(formData.get('days')), 10);
+        const anchorId = String(formData.get('anchor_id')) || null;
+        const paymentRef = String(formData.get('payment_reference') ?? '').trim() || null;
+
+        const { data, error } = await supabase.rpc('admin_grant_premium', {
+          p_email: email,
+          p_days: days,
+          p_anchor_id: anchorId,
+          p_payment_reference: paymentRef,
+          p_plan_label: days === 365 ? 'annual' : (days + 'd'),
+        });
+
+        grantSubmit.disabled = false;
+        grantSubmit.textContent = 'Grant Ver';
+
+        if (error) {
+          grantResult.className = 'form-result error';
+          grantResult.textContent = 'Hata: ' + error.message;
+          grantResult.hidden = false;
+          return;
+        }
+
+        grantResult.className = 'form-result success';
+        grantResult.textContent = '✓ Grant verildi (id: ' + String(data).slice(0, 8) + '...). ' +
+          'Kullanıcı kayıtlıysa anlık apply oldu, değilse 90g pending.';
+        grantResult.hidden = false;
+        grantForm.reset();
+
+        // Liste yenile
+        await Promise.all([loadAnchors(), loadPendingGrants()]);
+      });
+
+      signoutBtn.addEventListener('click', async () => {
+        await supabase.auth.signOut();
+        location.href = '/login';
+      });
+
+      init().catch((err) => {
+        loadingEl.textContent = 'Hata: ' + err.message;
+      });
+    });
+  </script>
+</Layout>
+
+<style>
+  .admin {
+    min-height: 100vh;
+    background: #f5f5f7;
+    padding: 24px;
+  }
+  .loading {
+    text-align: center;
+    padding: 60px;
+    color: #666;
+  }
+  .header {
+    max-width: 1100px;
+    margin: 0 auto 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .header h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0;
+    color: #0a0a0a;
+  }
+  .header-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .admin-email {
+    font-size: 13px;
+    color: #666;
+  }
+  .section {
+    max-width: 1100px;
+    margin: 0 auto 32px;
+    background: #fff;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  }
+  .section h2 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 8px;
+    color: #0a0a0a;
+  }
+  .section-desc {
+    font-size: 14px;
+    color: #666;
+    margin: 0 0 16px;
+    line-height: 1.5;
+  }
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .field.full {
+    grid-column: span 2;
+  }
+  label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #444;
+  }
+  input, select {
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    background: #fff;
+    font-family: inherit;
+  }
+  input:focus, select:focus {
+    outline: 2px solid #1a73e8;
+    outline-offset: 0;
+    border-color: transparent;
+  }
+  .btn {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .primary {
+    background: #071a3d;
+    color: #fff;
+  }
+  .link {
+    background: transparent;
+    color: #1a73e8;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .form-result {
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-top: 12px;
+  }
+  .form-result.success {
+    background: #f0fdf4;
+    color: #15803d;
+  }
+  .form-result.error {
+    background: #fef2f2;
+    color: #b91c1c;
+  }
+  .table-wrap {
+    overflow-x: auto;
+  }
+  .table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  .table th, .table td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid #eee;
+  }
+  .table th {
+    font-weight: 500;
+    color: #666;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .table code {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 12px;
+    color: #444;
+  }
+  .status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .status-active {
+    background: #dcfce7;
+    color: #15803d;
+  }
+  .status-warn {
+    background: #fef3c7;
+    color: #92400e;
+  }
+  .status-danger {
+    background: #fee2e2;
+    color: #b91c1c;
+  }
+  .empty {
+    color: #999;
+    text-align: center;
+    padding: 24px;
+    margin: 0;
+  }
+</style>

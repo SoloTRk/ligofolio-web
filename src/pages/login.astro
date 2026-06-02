@@ -1,0 +1,335 @@
+---
+// Giriş sayfası — 3'lü auth (email-pass + Google + Apple).
+// ADR-0041 §5 web admin altyapısı + §2 Yol C premium-activate caller.
+//
+// Akış:
+//   1. Kullanıcı email + şifre ile giriş ya da Google/Apple OAuth
+//   2. Başarılı login → query.next varsa o sayfaya, yoksa /admin (eğer
+//      is_admin) veya /premium-activate'a redirect
+//   3. Supabase session tarayıcı localStorage'da saklanır (web SDK default)
+//
+// Hybrid SSR: bu sayfa SSR olmasın — auth UI client-side; sayfa kendisi
+// statik kalabilir ama dinamik query param işleme için server'a izin
+// veriyoruz. Astro `output: 'server'` modunda default SSR; prerender YOK.
+
+import Layout from '../layouts/Layout.astro';
+
+const url = new URL(Astro.request.url);
+const nextParam = url.searchParams.get('next') ?? '';
+const safeNext = nextParam.startsWith('/') ? nextParam : '';
+const errorParam = url.searchParams.get('error') ?? '';
+
+const PAGE_TITLE = 'Giriş — Ligofolio';
+const PAGE_DESCRIPTION =
+  'Ligofolio hesabına giriş yap — premium aktivasyon veya admin panel için.';
+---
+
+<Layout title={PAGE_TITLE} description={PAGE_DESCRIPTION}>
+  <main class="login">
+    <div class="card">
+      <h1>Ligofolio Hesabı</h1>
+      <p class="subtitle">
+        Premium aktivasyon veya admin panel için hesabına giriş yap.
+      </p>
+
+      {errorParam && (
+        <div class="error" role="alert">
+          {errorParam === 'oauth_failed' && 'Sosyal giriş başarısız. Tekrar dene.'}
+          {errorParam === 'session_lost' && 'Oturum kapandı. Yeniden giriş yap.'}
+          {errorParam !== 'oauth_failed' &&
+            errorParam !== 'session_lost' &&
+            'Bir hata oluştu. Tekrar dene.'}
+        </div>
+      )}
+
+      <form id="email-form" class="form">
+        <label for="email">E-posta</label>
+        <input
+          id="email"
+          type="email"
+          name="email"
+          required
+          autocomplete="email"
+          inputmode="email"
+        />
+
+        <label for="password">Şifre</label>
+        <input
+          id="password"
+          type="password"
+          name="password"
+          required
+          autocomplete="current-password"
+          minlength="6"
+        />
+
+        <button type="submit" class="btn primary" id="email-submit">
+          Giriş Yap
+        </button>
+
+        <div id="form-error" class="form-error" role="alert" hidden></div>
+      </form>
+
+      <div class="divider"><span>veya</span></div>
+
+      <button type="button" class="btn oauth" data-provider="google">
+        <span class="oauth-icon">G</span>
+        Google ile devam et
+      </button>
+      <button type="button" class="btn oauth" data-provider="apple">
+        <span class="oauth-icon"></span>
+        Apple ile devam et
+      </button>
+
+      <p class="footer">
+        Hesabın yok mu? Premium aktivasyon için anchor/bayinin sana iletmiş
+        olması gereken e-posta ile aynı adresi kullan.
+      </p>
+    </div>
+  </main>
+
+  <script
+    define:vars={{
+      supabaseUrl: import.meta.env.PUBLIC_SUPABASE_URL,
+      supabaseAnonKey: import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+      nextUrl: safeNext,
+    }}
+  >
+    import('https://esm.sh/@supabase/supabase-js@2').then(({ createClient }) => {
+      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+        },
+      });
+
+      const form = document.getElementById('email-form');
+      const submit = document.getElementById('email-submit');
+      const errorBox = document.getElementById('form-error');
+
+      function showError(msg) {
+        errorBox.textContent = msg;
+        errorBox.hidden = false;
+      }
+
+      async function redirectAfterLogin() {
+        if (nextUrl) {
+          location.href = nextUrl;
+          return;
+        }
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          location.href = '/';
+          return;
+        }
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        location.href = profile?.is_admin ? '/admin' : '/premium-activate';
+      }
+
+      // Mevcut session varsa direkt redirect
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          redirectAfterLogin();
+        }
+      });
+
+      // Email + password form
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errorBox.hidden = true;
+        submit.disabled = true;
+        submit.textContent = 'Giriş yapılıyor...';
+
+        const formData = new FormData(form);
+        const email = String(formData.get('email') ?? '').trim().toLowerCase();
+        const password = String(formData.get('password') ?? '');
+
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        submit.disabled = false;
+        submit.textContent = 'Giriş Yap';
+
+        if (error) {
+          if (error.message.includes('Invalid login credentials')) {
+            showError('E-posta veya şifre yanlış.');
+          } else if (error.message.includes('Email not confirmed')) {
+            showError('E-posta adresin henüz doğrulanmadı. Mail kutunu kontrol et.');
+          } else {
+            showError(error.message);
+          }
+          return;
+        }
+
+        await redirectAfterLogin();
+      });
+
+      // Google + Apple OAuth
+      document.querySelectorAll('.btn.oauth').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const provider = btn.dataset.provider;
+          const redirectTo = nextUrl
+            ? location.origin + '/login?next=' + encodeURIComponent(nextUrl)
+            : location.origin + '/login';
+
+          const { error } = await supabase.auth.signInWithOAuth({
+            provider,
+            options: { redirectTo },
+          });
+
+          if (error) {
+            showError('Sosyal giriş hatası: ' + error.message);
+          }
+        });
+      });
+    });
+  </script>
+</Layout>
+
+<style>
+  .login {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: #f5f5f7;
+  }
+  .card {
+    width: 100%;
+    max-width: 420px;
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 40px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  }
+  h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0 0 8px;
+    color: #0a0a0a;
+  }
+  .subtitle {
+    font-size: 15px;
+    color: #666;
+    margin: 0 0 24px;
+    line-height: 1.5;
+  }
+  .error {
+    background: #fef2f2;
+    color: #b91c1c;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 16px;
+  }
+  .form {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #444;
+    margin-top: 12px;
+  }
+  input {
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 15px;
+    background: #fff;
+  }
+  input:focus {
+    outline: 2px solid #1a73e8;
+    outline-offset: 0;
+    border-color: transparent;
+  }
+  .btn {
+    border: none;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    margin-top: 16px;
+    transition: opacity 0.15s;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .primary {
+    background: #071a3d;
+    color: #fff;
+  }
+  .primary:hover:not(:disabled) {
+    background: #0a2455;
+  }
+  .form-error {
+    background: #fef2f2;
+    color: #b91c1c;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  .divider {
+    position: relative;
+    text-align: center;
+    margin: 24px 0 0;
+    color: #999;
+    font-size: 13px;
+  }
+  .divider::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: #e5e7eb;
+  }
+  .divider span {
+    background: #fff;
+    padding: 0 12px;
+    position: relative;
+  }
+  .oauth {
+    background: #fff;
+    color: #0a0a0a;
+    border: 1px solid #d1d5db;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .oauth:hover:not(:disabled) {
+    background: #f9fafb;
+  }
+  .oauth-icon {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    text-align: center;
+    line-height: 20px;
+    font-weight: 700;
+  }
+  .footer {
+    margin: 24px 0 0;
+    font-size: 13px;
+    color: #999;
+    line-height: 1.5;
+    text-align: center;
+  }
+</style>
